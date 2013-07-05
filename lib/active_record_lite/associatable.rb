@@ -7,14 +7,23 @@ require_relative './db_connection.rb'
 
 class AssocParams
   def other_class
+    @other_class_name.constantize
   end
 
   def other_table
+    @other_class_name.constantize.table_name
   end
 end
 
 class BelongsToAssocParams < AssocParams
+  
+  attr_reader :other_class_name, :primary_key, :foreign_key
+
   def initialize(name, params)
+    # same as HasManyAssocParams
+    @other_class_name = params[:class_name] || name.to_s.camelize.singularize
+    @primary_key = params[:primary_key] || :id
+    @foreign_key = params[:foreign_key] || "#{name.to_s.singularize}_id"
   end
 
   def type
@@ -22,7 +31,13 @@ class BelongsToAssocParams < AssocParams
 end
 
 class HasManyAssocParams < AssocParams
-  def initialize(name, params, self_class)
+  
+  attr_reader :other_class_name, :primary_key, :foreign_key
+
+  def initialize(name, params, self_class = self.class)
+    @other_class_name = params[:class_name] || name.to_s.camelize.singularize
+    @primary_key = params[:primary_key] || :id
+    @foreign_key = params[:foreign_key] || "#{name.to_s.singularize}_id"
   end
 
   def type
@@ -31,63 +46,40 @@ end
 
 module Associatable
 
-  def assoc_params(name, params = {})
-    {
-      :other_class_name => (params[:class_name] || name.to_s.camelize.singularize),
-      :primary_key => (params[:primary_key] || :id),
-      :foreign_key => (params[:foreign_key] || "#{name.to_s.singularize}_id")
-    }
-  end
-
   def belongs_to(name, params = {})
 
-    relations = assoc_params(name, params)
+    aps = BelongsToAssocParams.new(name, params)  
 
-    other_class_name = relations[:other_class_name]
-    primary_key = relations[:primary_key]
-    foreign_key = relations[:foreign_key]
-  
-
-    define_method "#{other_class_name.downcase}" do
-      other_class = other_class_name.constantize
-
-      other_table_name = other_class.table_name
+    define_method "#{aps.other_class_name.downcase}" do
 
       hashes_arr = DBConnection.execute("
         SELECT
           *
         FROM
-          #{other_table_name}
+          #{aps.other_table}
         WHERE
-          #{other_table_name}.id = #{self.send(foreign_key)}
+          #{aps.other_table}.#{aps.primary_key} = #{self.send(aps.foreign_key)}
         ")
 
-      other_class.parse_all(hashes_arr).first
+      aps.other_class.parse_all(hashes_arr).first
     end
   end
 
   def has_many(name, params = {})
-    relations = assoc_params(name, params)
+    aps = HasManyAssocParams.new(name, params)
 
-    other_class_name = relations[:other_class_name]
-    primary_key = relations[:primary_key]
-    foreign_key = relations[:foreign_key]
-  
-    define_method "#{other_class_name.downcase.pluralize}" do
-      other_class = other_class_name.constantize
-
-      other_table_name = other_class.table_name
+    define_method(name) do
 
       hashes_arr = DBConnection.execute("
         SELECT
           *
         FROM
-          #{other_table_name}
+          #{aps.other_table}
         WHERE
-          #{other_table_name}.#{foreign_key} = #{self.id}
+          #{aps.other_table}.#{aps.foreign_key} = #{aps.primary_key}
         ")
 
-      other_class.parse_all(hashes_arr)
+      aps.other_class.parse_all(hashes_arr)
     end
   end
 
